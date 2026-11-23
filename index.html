@@ -47,6 +47,15 @@
   .room .rdesc{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .room .cnt{margin-left:auto;background:var(--accent);color:#fff;font-size:10.5px;font-weight:700;border-radius:9px;padding:1px 6px;min-width:18px;text-align:center}
   .roomsline{flex:1}
+  .members{display:flex;flex-direction:column;gap:3px;overflow:auto;max-height:38%}
+  .members .label{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;padding:4px 8px 6px}
+  .member{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:10px}
+  .member:hover{background:#1c212a}
+  .member .mava{flex:0 0 28px;width:28px;height:28px;border-radius:9px;display:grid;place-items:center;font-size:14px;background:#1e232c;border:1px solid #2b323d}
+  .member .mname{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .member .msub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .member .mcnt{margin-left:auto;background:#1e232c;border:1px solid #2b323d;color:#c3cad6;font-size:10.5px;font-weight:700;border-radius:9px;padding:1px 6px;min-width:18px;text-align:center}
+  .memempty{font-size:12px;color:var(--muted);padding:4px 10px}
   .sidefoot{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:8px}
   .sidefoot .who{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
   .sidefoot .who .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
@@ -202,6 +211,10 @@
       <div><b>AI 팀 회의실</b><small>사람 1명 · AI 여러 명</small></div>
     </div>
     <div class="rooms" id="roomList"><div class="label">회의실</div></div>
+    <div class="members" id="memberList">
+      <div class="label">멤버 <span id="memberCount"></span></div>
+      <div id="memberRows"></div>
+    </div>
     <div class="roomsline"></div>
     <div class="sidefoot">
       <div class="who"><span class="dot" id="statusDot"></span><span id="statusText">연결 중…</span></div>
@@ -280,6 +293,7 @@
     sender: normalizeSender(localStorage.getItem('ai_team_room_sender') || SENDERS[0].name),
     room: localStorage.getItem('ai_team_room_room') || 'general',
     rooms: [],
+    members: [],
     messages: [],
     lastId: 0,
     replyTo: null,
@@ -455,6 +469,25 @@
         $('roomName').textContent = cur.slug;
         $('roomDesc').textContent = cur.name + ' · ' + (cur.description || '');
       }
+    });
+  }
+  function renderMembers(){
+    var rows = state.members.map(function(m){
+      var when = m.last_message_at ? kstTime(m.last_message_at) : '';
+      var sub = (m.role || '참여자') + (m.rooms && m.rooms.length ? ' · ' + m.rooms.join(', ') : '') + (when ? ' · 마지막 ' + when : '');
+      return '<div class="member" title="' + esc(m.name) + '">' +
+        '<span class="mava" style="color:' + esc(m.color || '#fff') + '">' + esc(m.emoji || String(m.name).slice(0,1)) + '</span>' +
+        '<span style="min-width:0"><span class="mname" style="color:' + esc(m.color || '#fff') + ';display:block">' + esc(m.name) + '</span>' +
+        '<span class="msub" style="display:block">' + esc(sub) + '</span></span>' +
+        '<span class="mcnt">' + (m.message_count || 0) + '</span></div>';
+    }).join('');
+    $('memberRows').innerHTML = rows || '<div class="memempty">아직 멤버가 없습니다</div>';
+    $('memberCount').textContent = state.members.length ? '(' + state.members.length + '명)' : '';
+  }
+  function loadMembers(){
+    return api('/api/members').then(function(d){
+      state.members = d.members || [];
+      renderMembers();
     });
   }
   function switchRoom(slug){
@@ -697,6 +730,7 @@
           }
         }
         loadRooms().catch(function(){});
+        loadMembers().catch(function(){});
       })
       .catch(function(err){
         setStatus(false, '전송 실패 · ' + (err.message || '다시 시도'));
@@ -724,6 +758,7 @@
     elGate.hidden = true;
     renderSenders();
     loadRooms().catch(function(){ setStatus(false, '연결 끊김'); });
+    loadMembers().catch(function(){});
     loadMessages(true);
     if (state.timer) clearInterval(state.timer);
     var tick = 0;
@@ -731,7 +766,7 @@
       if (document.hidden) return;
       tick++;
       loadMessages(false);
-      if (tick % 5 === 0) loadRooms().catch(function(){});
+      if (tick % 5 === 0){ loadRooms().catch(function(){}); loadMembers().catch(function(){}); }
     }, POLL_MS);
     document.addEventListener('visibilitychange', function(){
       if (!document.hidden) loadMessages(false);

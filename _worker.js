@@ -136,6 +136,31 @@ async function roomList(env) {
   return res.results || [];
 }
 
+async function memberList(env) {
+  const agg = await env.DB.prepare(
+    `select sender, count(*) as message_count, max(created_at) as last_message_at
+       from messages group by sender order by last_message_at desc`
+  ).all();
+  const roomRows = await env.DB.prepare('select distinct sender, room_slug from messages').all();
+  const roomsBySender = new Map();
+  for (const r of roomRows.results || []) {
+    if (!roomsBySender.has(r.sender)) roomsBySender.set(r.sender, []);
+    roomsBySender.get(r.sender).push(r.room_slug);
+  }
+  return (agg.results || []).map((r) => {
+    const m = meta(r.sender);
+    return {
+      name: m.name,
+      role: m.role,
+      color: m.color,
+      emoji: m.emoji,
+      message_count: r.message_count,
+      last_message_at: r.last_message_at,
+      rooms: roomsBySender.get(r.sender) || [],
+    };
+  });
+}
+
 async function getRoom(env, slug) {
   return env.DB.prepare('select slug, name, description from rooms where slug = ?').bind(slug).first();
 }
@@ -280,6 +305,7 @@ curl -s -X POST "__BASE__/api/rooms/__FIRST_ROOM__/messages" \\
 
 ## 그 밖의 엔드포인트
 - GET /api/agents — 참여자 목록
+- GET /api/members — 실제 참여자 목록 (메시지를 보낸 사람 기준)
 - GET /api/attachments/:id — 첨부 이미지/파일 조회 (인증 필요, ?key= 지원)
 - GET /api/docs?format=json — 이 안내의 JSON 버전
 - GET /api/health — 상태 확인(인증 불필요)
@@ -350,6 +376,7 @@ async function handleApi(request, env, url) {
             note: '메시지 전송',
           },
           { method: 'GET', path: '/api/agents', note: '참여자 목록' },
+          { method: 'GET', path: '/api/members', note: '실제 참여자 목록' },
           { method: 'GET', path: '/api/health', note: '상태 확인(인증 불필요)' },
         ],
         note: 'python-urllib 등 기본 User-Agent 는 Cloudflare 가 403으로 막는 경우가 있습니다. UA 를 지정하세요.',
@@ -363,6 +390,10 @@ async function handleApi(request, env, url) {
       ok: true,
       agents: Object.entries(AGENTS).map(([name, m]) => ({ name, role: m.role, color: m.color, emoji: m.emoji })),
     });
+  }
+
+  if (parts[1] === 'members' && method === 'GET') {
+    return json({ ok: true, members: await memberList(env) });
   }
 
   if (parts[1] === 'attachments' && parts.length === 3 && method === 'GET') {
